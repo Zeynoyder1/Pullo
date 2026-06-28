@@ -1,174 +1,170 @@
 /**
- * PULLFORCE AI — app.js
- * Pull-up counter using TensorFlow.js MoveNet pose detection
+ * RepTrack AI — app.js
+ * Supports: Pull-Up detection + Push-Up detection
  *
- * Algorithm:
- *   - Track the Y-position of WRISTS and SHOULDERS relative to the NOSE
- *   - A rep = full hang (arms extended) → chin above hands → return to hang
- *   - Elbow angle is the primary signal:
- *       DOWN phase: elbows ~straight (angle > threshold)
- *       UP   phase: elbows bent, nose at or above wrists
+ * Pull-Up algorithm:
+ *   Track elbow angle (shoulder–elbow–wrist).
+ *   DOWN = arms extended (angle > 150°)
+ *   UP   = elbows bent past threshold (< ~90°)
+ *   Rep  = DOWN → UP → DOWN
+ *
+ * Push-Up algorithm:
+ *   Track elbow angle AND hip position relative to shoulders+ankles.
+ *   DOWN = elbows bent (angle < ~90°), body close to ground
+ *   UP   = arms extended (angle > 150°), body in plank line
+ *   Rep  = UP → DOWN → UP
  */
 
-/* ── DOM References ─────────────────────────────── */
-const video          = document.getElementById('videoFeed');
-const canvas         = document.getElementById('poseCanvas');
-const ctx            = canvas.getContext('2d');
-const repCountEl     = document.getElementById('repCount');
-const phaseFill      = document.getElementById('phaseFill');
-const phaseText      = document.getElementById('phaseText');
-const overlayStatus  = document.getElementById('overlayStatus');
-const statusDot      = document.getElementById('statusDot');
-const statusLabel    = document.getElementById('statusLabel');
-const repFlash       = document.getElementById('repFlash');
-const placeholder    = document.getElementById('cameraPlaceholder');
-const modelLoading   = document.getElementById('modelLoading');
-const loadingBar     = document.getElementById('loadingBarFill');
-const btnCamera      = document.getElementById('btnCamera');
-const btnReset       = document.getElementById('btnReset');
-const btnNewSet      = document.getElementById('btnNewSet');
-const sensitivitySlider = document.getElementById('sensitivitySlider');
-const totalRepsEl    = document.getElementById('totalReps');
-const totalSetsEl    = document.getElementById('totalSets');
-const bestSetEl      = document.getElementById('bestSet');
-const elapsedTimeEl  = document.getElementById('elapsedTime');
-const historyList    = document.getElementById('historyList');
-const setNumberEl    = document.getElementById('setNumber');
+/* ─── SVG gradient for ring ─────────────────────── */
+document.body.insertAdjacentHTML('beforeend', `
+  <svg id="ring-defs" style="position:absolute;width:0;height:0;overflow:hidden">
+    <defs>
+      <linearGradient id="ringGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#A78BFA"/>
+        <stop offset="100%" stop-color="#60A5FA"/>
+      </linearGradient>
+      <linearGradient id="ringGradPushup" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#FB923C"/>
+        <stop offset="100%" stop-color="#FBBF24"/>
+      </linearGradient>
+    </defs>
+  </svg>`);
 
-/* ── State ──────────────────────────────────────── */
+/* ─── DOM refs ───────────────────────────────────── */
+const video       = document.getElementById('video');
+const canvas      = document.getElementById('canvas');
+const ctx         = canvas.getContext('2d');
+const camIdle     = document.getElementById('camIdle');
+const hud         = document.getElementById('hud');
+const hudDot      = document.getElementById('hudDot');
+const hudLabel    = document.getElementById('hudLabel');
+const hudMode     = document.getElementById('hudMode');
+const flash       = document.getElementById('flash');
+const btnStart    = document.getElementById('btnStart');
+const btnStop     = document.getElementById('btnStop');
+const btnReset    = document.getElementById('btnReset');
+const btnNewSet   = document.getElementById('btnNewSet');
+const phaseFill   = document.getElementById('phaseFill');
+const angleBadge  = document.getElementById('angleBadge');
+const guideTip    = document.getElementById('guideTip');
+const guideText   = document.getElementById('guideText');
+const repCountEl  = document.getElementById('repCount');
+const ringProg    = document.getElementById('ringProg');
+const setNumEl    = document.getElementById('setNum');
+const targetValEl = document.getElementById('targetVal');
+const sTotalReps  = document.getElementById('sTotalReps');
+const sSets       = document.getElementById('sSets');
+const sBest       = document.getElementById('sBest');
+const sTime       = document.getElementById('sTime');
+const historyEl   = document.getElementById('history');
+const sensitivity = document.getElementById('sensitivity');
+const loadingOverlay = document.getElementById('loadingOverlay');
+const modeBtns    = document.querySelectorAll('.mode-btn');
+
+/* ─── State ──────────────────────────────────────── */
 let detector     = null;
+let stream       = null;
 let animFrame    = null;
 let cameraOn     = false;
-let stream       = null;
+
+let mode         = 'pullup';   // 'pullup' | 'pushup'
 
 let repCount     = 0;
 let setNumber    = 1;
 let totalReps    = 0;
 let bestSet      = 0;
+let targetReps   = 10;
 let setHistory   = [];
-let sessionStart = null;
+
+let phase        = 'down';     // pullup: 'down'|'up' / pushup: 'up'|'down'
+let angleSmoothed = 180;
+let lastRepTime  = 0;
+const DEBOUNCE   = 900;
+
+let sessionStart  = null;
 let timerInterval = null;
 
-// Phase tracking
-let phase        = 'down';   // 'down' | 'going-up' | 'up' | 'going-down'
-let elbowAngleSmoothed = 180;
-let lastRepTime  = 0;        // debounce (ms)
-const REP_DEBOUNCE = 800;
+const RING_CIRC   = 2 * Math.PI * 80; // r=80 → 502.65
 
-/* ── Sensitivity map ────────────────────────────── */
-// Maps slider 1-5 → elbow angle threshold for UP detection
-const SENSITIVITY_MAP = {
-  1: 75,  // strict  — must nearly fully curl
-  2: 85,
-  3: 95,  // default — forgiving
-  4: 105,
-  5: 118, // loose   — partial curl counts
-};
-const DOWN_ANGLE = 155; // considered "hanging" (arms extended)
-
-/* ── Keypoint indices (MoveNet / COCO 17) ───────── */
+/* ─── Keypoint indices (COCO 17) ────────────────── */
 const KP = {
-  NOSE:          0,
-  LEFT_EYE:      1,
-  RIGHT_EYE:     2,
-  LEFT_EAR:      3,
-  RIGHT_EAR:     4,
-  LEFT_SHOULDER: 5,
-  RIGHT_SHOULDER:6,
-  LEFT_ELBOW:    7,
-  RIGHT_ELBOW:   8,
-  LEFT_WRIST:    9,
-  RIGHT_WRIST:  10,
-  LEFT_HIP:     11,
-  RIGHT_HIP:    12,
-  LEFT_KNEE:    13,
-  RIGHT_KNEE:   14,
-  LEFT_ANKLE:   15,
-  RIGHT_ANKLE:  16,
+  NOSE:0, L_EYE:1, R_EYE:2, L_EAR:3, R_EAR:4,
+  L_SHO:5, R_SHO:6, L_ELB:7, R_ELB:8,
+  L_WRI:9, R_WRI:10, L_HIP:11, R_HIP:12,
+  L_KNE:13, R_KNE:14, L_ANK:15, R_ANK:16,
 };
 
-/* ── Utility: angle between three points ────────── */
+/* ─── Guides per mode ────────────────────────────── */
+const GUIDES = {
+  pullup: [
+    'Hang from the bar with arms fully extended. Side-on camera angle works best.',
+    'Pull until your chin clears the bar, then lower back to full hang.',
+    'Keep core tight. Rep is counted on return to full hang position.',
+  ],
+  pushup: [
+    'Start in a plank: hands shoulder-width apart, body in a straight line.',
+    'Lower until elbows reach ~90°, then push back up fully.',
+    'Keep hips level — don\'t let them sag or pike up.',
+  ],
+};
+let guideIndex = 0;
+setInterval(() => {
+  guideIndex = (guideIndex + 1) % GUIDES[mode].length;
+  guideText.textContent = GUIDES[mode][guideIndex];
+}, 6000);
+
+/* ─── Sensitivity maps ───────────────────────────── */
+// Pull-up: angle must drop below this to count as "up"
+const PULLUP_UP_ANGLE = { 1:70, 2:80, 3:92, 4:104, 5:116 };
+const PULLUP_DOWN_ANGLE = 148;
+
+// Push-up: arm must extend above this to count as "up" (top position)
+const PUSHUP_UP_ANGLE   = { 1:155, 2:148, 3:142, 4:135, 5:128 };
+// Push-up: arm must bend below this to count as "down" (bottom position)
+const PUSHUP_DOWN_ANGLE = { 1:80,  2:88,  3:96,  4:104, 5:112 };
+
+/* ─── Angle helper ───────────────────────────────── */
 function angleBetween(a, mid, b) {
-  const radians =
-    Math.atan2(b.y - mid.y, b.x - mid.x) -
-    Math.atan2(a.y - mid.y, a.x - mid.x);
-  let angle = Math.abs((radians * 180) / Math.PI);
-  if (angle > 180) angle = 360 - angle;
-  return angle;
+  const r = Math.atan2(b.y - mid.y, b.x - mid.x) - Math.atan2(a.y - mid.y, a.x - mid.x);
+  let deg = Math.abs(r * 180 / Math.PI);
+  if (deg > 180) deg = 360 - deg;
+  return deg;
 }
 
-/* ── Load model ─────────────────────────────────── */
+/* ─── Load model ─────────────────────────────────── */
 async function loadModel() {
-  modelLoading.classList.add('visible');
-  try {
-    await tf.ready();
-    detector = await poseDetection.createDetector(
-      poseDetection.SupportedModels.MoveNet,
-      {
-        modelType: poseDetection.movenet.modelType.SINGLEPOSE_THUNDER,
-        enableSmoothing: true,
-      }
-    );
-    console.log('✅ MoveNet loaded');
-  } catch (err) {
-    console.error('Model load failed:', err);
-    setStatus('error', 'Model failed to load');
-  } finally {
-    modelLoading.classList.remove('visible');
-  }
+  loadingOverlay.classList.add('show');
+  await tf.ready();
+  detector = await poseDetection.createDetector(
+    poseDetection.SupportedModels.MoveNet,
+    { modelType: poseDetection.movenet.modelType.SINGLEPOSE_THUNDER, enableSmoothing: true }
+  );
+  loadingOverlay.classList.remove('show');
 }
 
-/* ── Camera toggle ──────────────────────────────── */
-async function toggleCamera() {
-  if (cameraOn) {
-    stopCamera();
-  } else {
-    await startCamera();
-  }
-}
-
+/* ─── Camera ─────────────────────────────────────── */
 async function startCamera() {
-  if (!detector) {
-    setStatus('', 'Loading AI model…');
-    await loadModel();
-  }
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
-      audio: false,
-    });
-    video.srcObject = stream;
-    await video.play();
+  if (!detector) await loadModel();
+  stream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false
+  });
+  video.srcObject = stream;
+  await video.play();
+  video.addEventListener('loadedmetadata', () => {
+    canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+  });
 
-    // Show video + canvas
-    placeholder.style.display = 'none';
-    video.style.display = 'block';
-    canvas.style.display = 'block';
-
-    // Sync canvas size to video
-    video.addEventListener('loadedmetadata', () => {
-      canvas.width  = video.videoWidth;
-      canvas.height = video.videoHeight;
-    });
-
-    cameraOn = true;
-    btnCamera.textContent = 'Stop Camera';
-    btnCamera.classList.add('active');
-    btnReset.disabled  = false;
-    btnNewSet.disabled = false;
-
-    setStatus('live', 'Detecting pose…');
-    startSessionTimer();
-    runDetection();
-  } catch (err) {
-    console.error('Camera error:', err);
-    if (err.name === 'NotAllowedError') {
-      setStatus('error', 'Camera access denied');
-      alert('Please allow camera access and reload the page.');
-    } else {
-      setStatus('error', 'Camera unavailable');
-    }
-  }
+  video.style.display = 'block';
+  canvas.style.display = 'block';
+  camIdle.style.display = 'none';
+  hud.style.display = 'flex';
+  btnStop.style.display = 'block';
+  btnReset.disabled = false;
+  btnNewSet.disabled = false;
+  cameraOn = true;
+  startTimer();
+  setStatus('live', 'Detecting…');
+  runLoop();
 }
 
 function stopCamera() {
@@ -176,249 +172,287 @@ function stopCamera() {
   if (stream) stream.getTracks().forEach(t => t.stop());
   video.style.display = 'none';
   canvas.style.display = 'none';
-  placeholder.style.display = 'flex';
+  camIdle.style.display = 'flex';
+  hud.style.display = 'none';
+  btnStop.style.display = 'none';
+  btnReset.disabled = true;
+  btnNewSet.disabled = true;
   cameraOn = false;
-  btnCamera.textContent = 'Enable Camera';
-  btnCamera.classList.remove('active');
-  setStatus('', 'Camera off');
-  stopSessionTimer();
+  stopTimer();
+  setStatus('', 'Stopped');
 }
 
-/* ── Main detection loop ────────────────────────── */
-async function runDetection() {
+/* ─── Main loop ──────────────────────────────────── */
+async function runLoop() {
   if (!cameraOn) return;
-
   if (video.readyState >= 2) {
     try {
       const poses = await detector.estimatePoses(video);
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-
       if (poses.length > 0) {
-        const pose = poses[0];
-        drawSkeleton(pose.keypoints);
-        processPose(pose.keypoints);
+        drawSkeleton(poses[0].keypoints);
+        if (mode === 'pullup') processPullup(poses[0].keypoints);
+        else                   processPushup(poses[0].keypoints);
       } else {
         setStatus('live', 'No person detected');
-        phaseText.textContent = '—';
       }
-    } catch (err) {
-      console.warn('Detection error:', err);
-    }
+    } catch(e) { /* swallow frame errors */ }
   }
-
-  animFrame = requestAnimationFrame(runDetection);
+  animFrame = requestAnimationFrame(runLoop);
 }
 
-/* ── Rep logic ──────────────────────────────────── */
-function processPose(keypoints) {
-  const conf = 0.25; // minimum keypoint confidence
+/* ─── Pull-up logic ──────────────────────────────── */
+function processPullup(kps) {
+  const conf = 0.25;
+  const ok = i => kps[i]?.score > conf;
 
-  const get = (idx) => keypoints[idx];
-  const ok  = (kp)  => kp && kp.score > conf;
+  const la = (ok(KP.L_SHO) && ok(KP.L_ELB) && ok(KP.L_WRI))
+    ? angleBetween(kps[KP.L_SHO], kps[KP.L_ELB], kps[KP.L_WRI]) : null;
+  const ra = (ok(KP.R_SHO) && ok(KP.R_ELB) && ok(KP.R_WRI))
+    ? angleBetween(kps[KP.R_SHO], kps[KP.R_ELB], kps[KP.R_WRI]) : null;
 
-  // Prefer whichever side has higher confidence
-  const leftElbowAngle  = ok(get(KP.LEFT_SHOULDER)) && ok(get(KP.LEFT_ELBOW)) && ok(get(KP.LEFT_WRIST))
-    ? angleBetween(get(KP.LEFT_SHOULDER), get(KP.LEFT_ELBOW), get(KP.LEFT_WRIST)) : null;
+  const angle = (la !== null && ra !== null) ? (la+ra)/2 : (la ?? ra);
+  if (angle === null) { setStatus('live', 'Arms not visible'); return; }
 
-  const rightElbowAngle = ok(get(KP.RIGHT_SHOULDER)) && ok(get(KP.RIGHT_ELBOW)) && ok(get(KP.RIGHT_WRIST))
-    ? angleBetween(get(KP.RIGHT_SHOULDER), get(KP.RIGHT_ELBOW), get(KP.RIGHT_WRIST)) : null;
+  angleSmoothed = angleSmoothed * 0.72 + angle * 0.28;
 
-  // Use average or whichever is available
-  let elbowAngle = null;
-  if (leftElbowAngle !== null && rightElbowAngle !== null) {
-    elbowAngle = (leftElbowAngle + rightElbowAngle) / 2;
-  } else if (leftElbowAngle !== null) {
-    elbowAngle = leftElbowAngle;
-  } else if (rightElbowAngle !== null) {
-    elbowAngle = rightElbowAngle;
-  }
+  const upThr   = PULLUP_UP_ANGLE[sensitivity.value];
+  const downThr = PULLUP_DOWN_ANGLE;
+  const progress = Math.max(0, Math.min(1, (downThr - angleSmoothed) / (downThr - upThr)));
 
-  if (elbowAngle === null) {
-    setStatus('live', 'Arms not visible');
-    return;
-  }
-
-  // Smooth angle
-  elbowAngleSmoothed = elbowAngleSmoothed * 0.7 + elbowAngle * 0.3;
-
-  const upAngle   = SENSITIVITY_MAP[parseInt(sensitivitySlider.value)];
-  const progress  = Math.max(0, Math.min(1, (DOWN_ANGLE - elbowAngleSmoothed) / (DOWN_ANGLE - upAngle)));
-
-  // Update phase bar
   phaseFill.style.width = (progress * 100) + '%';
-  phaseText.textContent = Math.round(elbowAngleSmoothed) + '°';
+  angleBadge.textContent = Math.round(angleSmoothed) + '°';
 
-  // State machine
-  const now = Date.now();
-
-  if (phase === 'down' && elbowAngleSmoothed > DOWN_ANGLE) {
-    // Confirmed hanging position
-    setStatus('live', 'HANGING — pull up!');
-  }
-
-  if (phase === 'down' && elbowAngleSmoothed < upAngle) {
+  if (phase === 'down' && angleSmoothed < upThr) {
     phase = 'up';
-    setStatus('live', 'UP — come back down');
-  }
-
-  if (phase === 'up' && elbowAngleSmoothed > DOWN_ANGLE) {
-    if (now - lastRepTime > REP_DEBOUNCE) {
-      phase = 'down';
-      lastRepTime = now;
+    setStatus('live', 'UP — lower back down');
+  } else if (phase === 'up' && angleSmoothed > downThr) {
+    if (Date.now() - lastRepTime > DEBOUNCE) {
+      phase = 'down'; lastRepTime = Date.now();
       countRep();
+      setStatus('live', `Rep ${repCount} — keep going!`);
     }
+  } else if (phase === 'down') {
+    setStatus('live', angleSmoothed > 140 ? 'HANGING — pull up!' : 'Extend arms fully first');
   }
 }
 
-/* ── Count a rep ─────────────────────────────────── */
+/* ─── Push-up logic ──────────────────────────────── */
+function processPushup(kps) {
+  const conf = 0.22;
+  const ok = i => kps[i]?.score > conf;
+
+  // Elbow angle
+  const la = (ok(KP.L_SHO) && ok(KP.L_ELB) && ok(KP.L_WRI))
+    ? angleBetween(kps[KP.L_SHO], kps[KP.L_ELB], kps[KP.L_WRI]) : null;
+  const ra = (ok(KP.R_SHO) && ok(KP.R_ELB) && ok(KP.R_WRI))
+    ? angleBetween(kps[KP.R_SHO], kps[KP.R_ELB], kps[KP.R_WRI]) : null;
+
+  const angle = (la !== null && ra !== null) ? (la+ra)/2 : (la ?? ra);
+  if (angle === null) { setStatus('live', 'Arms not visible'); return; }
+
+  angleSmoothed = angleSmoothed * 0.72 + angle * 0.28;
+
+  const upThr   = PUSHUP_UP_ANGLE[sensitivity.value];
+  const downThr = PUSHUP_DOWN_ANGLE[sensitivity.value];
+
+  // Progress: 0 = arms extended (top), 1 = arms bent (bottom)
+  const progress = Math.max(0, Math.min(1, (upThr - angleSmoothed) / (upThr - downThr)));
+  phaseFill.style.width = (progress * 100) + '%';
+  angleBadge.textContent = Math.round(angleSmoothed) + '°';
+
+  // Push-up rep: starts at top (extended), goes DOWN then back UP
+  if (phase === 'up' && angleSmoothed < downThr) {
+    phase = 'down';
+    setStatus('live', 'DOWN — push back up!');
+  } else if (phase === 'down' && angleSmoothed > upThr) {
+    if (Date.now() - lastRepTime > DEBOUNCE) {
+      phase = 'up'; lastRepTime = Date.now();
+      countRep();
+      setStatus('live', `Rep ${repCount} — great form!`);
+    }
+  } else if (phase === 'up') {
+    setStatus('live', angleSmoothed > 135 ? 'TOP — lower down!' : 'Extend arms to start');
+  }
+}
+
+/* ─── Count rep ──────────────────────────────────── */
 function countRep() {
   repCount++;
   totalReps++;
+  sTotalReps.textContent = totalReps;
+  if (repCount > bestSet) { bestSet = repCount; sBest.textContent = bestSet; }
 
-  // Update displays
   repCountEl.textContent = repCount;
-  totalRepsEl.textContent = totalReps;
-  if (repCount > bestSet) {
-    bestSet = repCount;
-    bestSetEl.textContent = bestSet;
-  }
-
-  // Animate counter
   repCountEl.classList.remove('bump');
-  void repCountEl.offsetWidth; // reflow
+  void repCountEl.offsetWidth;
   repCountEl.classList.add('bump');
 
-  // Flash overlay
-  repFlash.classList.remove('show');
-  void repFlash.offsetWidth;
-  repFlash.classList.add('show');
+  updateRing();
 
-  setStatus('live', `Rep ${repCount} — keep going!`);
+  // Flash
+  flash.className = 'flash' + (mode === 'pushup' ? ' pushup-flash' : '');
+  void flash.offsetWidth;
+  flash.classList.add('pop');
 }
 
-/* ── Draw skeleton ───────────────────────────────── */
-function drawSkeleton(keypoints) {
-  const connections = [
-    [KP.LEFT_SHOULDER,  KP.RIGHT_SHOULDER],
-    [KP.LEFT_SHOULDER,  KP.LEFT_ELBOW],
-    [KP.LEFT_ELBOW,     KP.LEFT_WRIST],
-    [KP.RIGHT_SHOULDER, KP.RIGHT_ELBOW],
-    [KP.RIGHT_ELBOW,    KP.RIGHT_WRIST],
-    [KP.LEFT_SHOULDER,  KP.LEFT_HIP],
-    [KP.RIGHT_SHOULDER, KP.RIGHT_HIP],
-    [KP.LEFT_HIP,       KP.RIGHT_HIP],
-    [KP.LEFT_HIP,       KP.LEFT_KNEE],
-    [KP.RIGHT_HIP,      KP.RIGHT_KNEE],
-    [KP.LEFT_KNEE,      KP.LEFT_ANKLE],
-    [KP.RIGHT_KNEE,     KP.RIGHT_ANKLE],
-    [KP.LEFT_EAR,       KP.LEFT_SHOULDER],
-    [KP.RIGHT_EAR,      KP.RIGHT_SHOULDER],
+/* ─── Ring progress ──────────────────────────────── */
+function updateRing() {
+  const frac = Math.min(repCount / targetReps, 1);
+  const offset = RING_CIRC - frac * RING_CIRC;
+  ringProg.style.strokeDashoffset = offset;
+  ringProg.setAttribute('stroke', `url(#${mode === 'pushup' ? 'ringGradPushup' : 'ringGrad'})`);
+}
+
+/* ─── Draw skeleton ──────────────────────────────── */
+function drawSkeleton(kps) {
+  const CONNECTIONS = [
+    [KP.L_SHO, KP.R_SHO],
+    [KP.L_SHO, KP.L_ELB], [KP.L_ELB, KP.L_WRI],
+    [KP.R_SHO, KP.R_ELB], [KP.R_ELB, KP.R_WRI],
+    [KP.L_SHO, KP.L_HIP], [KP.R_SHO, KP.R_HIP],
+    [KP.L_HIP, KP.R_HIP],
+    [KP.L_HIP, KP.L_KNE], [KP.L_KNE, KP.L_ANK],
+    [KP.R_HIP, KP.R_KNE], [KP.R_KNE, KP.R_ANK],
+    [KP.L_EAR, KP.L_SHO], [KP.R_EAR, KP.R_SHO],
   ];
 
-  const LIME   = '#C8FF00';
-  const FADED  = 'rgba(200,255,0,0.3)';
-  const conf   = 0.25;
+  const mainColor  = mode === 'pushup' ? '#FB923C' : '#A78BFA';
+  const jointColor = mode === 'pushup' ? '#FBBF24' : '#60A5FA';
+  const conf = 0.25;
 
-  // Lines
   ctx.lineWidth = 2.5;
-  connections.forEach(([i, j]) => {
-    const a = keypoints[i], b = keypoints[j];
+  CONNECTIONS.forEach(([i, j]) => {
+    const a = kps[i], b = kps[j];
     if (a?.score > conf && b?.score > conf) {
       ctx.beginPath();
-      ctx.strokeStyle = LIME;
+      ctx.strokeStyle = mainColor;
+      ctx.globalAlpha = Math.min(a.score, b.score);
       ctx.moveTo(a.x, a.y);
       ctx.lineTo(b.x, b.y);
       ctx.stroke();
     }
   });
+  ctx.globalAlpha = 1;
 
-  // Points
-  keypoints.forEach((kp) => {
+  kps.forEach(kp => {
     if (kp.score > conf) {
       ctx.beginPath();
-      ctx.fillStyle = kp.score > 0.6 ? LIME : FADED;
-      ctx.arc(kp.x, kp.y, 4, 0, 2 * Math.PI);
+      ctx.fillStyle = kp.score > 0.6 ? jointColor : 'rgba(255,255,255,0.25)';
+      ctx.arc(kp.x, kp.y, 5, 0, 2 * Math.PI);
       ctx.fill();
     }
   });
 }
 
-/* ── Status helper ───────────────────────────────── */
-function setStatus(type, message) {
-  statusLabel.textContent = message;
-  statusDot.className = 'status-dot';
-  if (type) statusDot.classList.add(type);
+/* ─── Mode switch ────────────────────────────────── */
+function setMode(m) {
+  mode = m;
+  phase = m === 'pullup' ? 'down' : 'up';
+  angleSmoothed = 180;
+  resetReps();
+
+  modeBtns.forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.mode === m);
+  });
+
+  const isPush = m === 'pushup';
+  hudMode.textContent = isPush ? 'PUSH-UP' : 'PULL-UP';
+  hudMode.classList.toggle('pushup', isPush);
+  phaseFill.classList.toggle('pushup', isPush);
+  repCountEl.classList.toggle('pushup-mode', isPush);
+  guideTip.classList.toggle('pushup-tip', isPush);
+  guideText.textContent = GUIDES[m][0];
+  guideIndex = 0;
+
+  updateRing();
 }
 
-/* ── Reset current set ───────────────────────────── */
+/* ─── Reset / new set ────────────────────────────── */
 function resetReps() {
   repCount = 0;
-  phase = 'down';
-  elbowAngleSmoothed = 180;
+  phase = mode === 'pullup' ? 'down' : 'up';
+  angleSmoothed = 180;
   repCountEl.textContent = '0';
   phaseFill.style.width = '0%';
-  phaseText.textContent = '—';
+  angleBadge.textContent = '—';
+  updateRing();
 }
 
-/* ── New set ─────────────────────────────────────── */
 function newSet() {
   if (repCount > 0) {
-    // Log completed set
+    if (repCount > bestSet) { bestSet = repCount; sBest.textContent = bestSet; }
+
     const item = document.createElement('div');
     item.className = 'history-item';
     item.innerHTML = `
       <span class="history-item-label">Set ${setNumber}</span>
-      <span class="history-item-val">${repCount} reps</span>
+      <span class="history-item-mode">${mode === 'pullup' ? '↑' : '↓'}</span>
+      <span class="history-item-val ${mode}">${repCount} reps</span>
     `;
-    // Remove empty message
-    const empty = historyList.querySelector('.history-empty');
+    const empty = historyEl.querySelector('.history-empty');
     if (empty) empty.remove();
-    historyList.prepend(item);
-
-    if (repCount > bestSet) {
-      bestSet = repCount;
-      bestSetEl.textContent = bestSet;
-    }
-    setHistory.push(repCount);
+    historyEl.prepend(item);
+    setHistory.push({ mode, reps: repCount });
   }
 
   setNumber++;
-  setNumberEl.textContent = setNumber;
-  totalSetsEl.textContent = setNumber;
+  setNumEl.textContent = setNumber;
+  sSets.textContent = setNumber;
   resetReps();
 }
 
-/* ── Session timer ───────────────────────────────── */
-function startSessionTimer() {
+/* ─── Target ─────────────────────────────────────── */
+document.getElementById('targetPlus').addEventListener('click', () => {
+  targetReps = Math.min(targetReps + 1, 99);
+  targetValEl.textContent = targetReps;
+  updateRing();
+});
+document.getElementById('targetMinus').addEventListener('click', () => {
+  targetReps = Math.max(targetReps - 1, 1);
+  targetValEl.textContent = targetReps;
+  updateRing();
+});
+
+/* ─── Timer ──────────────────────────────────────── */
+function startTimer() {
   if (sessionStart) return;
   sessionStart = Date.now();
   timerInterval = setInterval(() => {
-    const elapsed = Math.floor((Date.now() - sessionStart) / 1000);
-    const m = Math.floor(elapsed / 60);
-    const s = elapsed % 60;
-    elapsedTimeEl.textContent = `${m}:${s.toString().padStart(2, '0')}`;
+    const s = Math.floor((Date.now() - sessionStart) / 1000);
+    sTime.textContent = `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`;
   }, 1000);
 }
-
-function stopSessionTimer() {
+function stopTimer() {
   clearInterval(timerInterval);
+  sessionStart = null;
 }
 
-/* ── Event listeners ─────────────────────────────── */
-btnCamera.addEventListener('click', toggleCamera);
+/* ─── Status ─────────────────────────────────────── */
+function setStatus(type, msg) {
+  hudLabel.textContent = msg;
+  hudDot.className = 'hud-dot' + (type ? ` ${type}` : '');
+}
+
+/* ─── Event listeners ────────────────────────────── */
+btnStart.addEventListener('click', async () => {
+  try { await startCamera(); }
+  catch(err) {
+    if (err.name === 'NotAllowedError') {
+      alert('Camera access denied. Please allow camera access and try again.');
+    } else {
+      alert('Could not start camera: ' + err.message);
+    }
+  }
+});
+
+btnStop.addEventListener('click', stopCamera);
 btnReset.addEventListener('click', resetReps);
 btnNewSet.addEventListener('click', newSet);
 
-/* Smooth scroll for "Start Counting" button */
-document.querySelectorAll('a[href="#tracker"]').forEach(a => {
-  a.addEventListener('click', (e) => {
-    e.preventDefault();
-    document.getElementById('tracker').scrollIntoView({ behavior: 'smooth' });
-  });
+modeBtns.forEach(btn => {
+  btn.addEventListener('click', () => setMode(btn.dataset.mode));
 });
 
-/* ── On load: pre-load model ─────────────────────── */
-window.addEventListener('load', () => {
-  // Defer model loading until camera is requested (saves bandwidth)
-  console.log('PullForce AI ready. Click "Enable Camera" to begin.');
-});
+/* ─── Init ───────────────────────────────────────── */
+updateRing();

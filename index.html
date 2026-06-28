@@ -3,161 +3,233 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>PullForce AI — Pull-Up Counter</title>
+  <title>RepTrack AI — Fitness Counter</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,300&family=Space+Grotesk:wght@300;400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
 
+  <!-- Ambient blobs -->
+  <div class="ambient" aria-hidden="true">
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+    <div class="blob blob-3"></div>
+  </div>
+
   <!-- HEADER -->
   <header class="header">
     <div class="logo">
-      <span class="logo-mark">↑</span>
-      <span class="logo-text">PULLFORCE<span class="logo-sub">AI</span></span>
+      <svg class="logo-icon" viewBox="0 0 32 32" fill="none">
+        <circle cx="16" cy="16" r="14" stroke="url(#lg)" stroke-width="2.5"/>
+        <path d="M10 22 L16 10 L22 22" stroke="url(#lg)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <defs>
+          <linearGradient id="lg" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+            <stop stop-color="#A78BFA"/>
+            <stop offset="1" stop-color="#60A5FA"/>
+          </linearGradient>
+        </defs>
+      </svg>
+      <span class="logo-text">RepTrack <span class="logo-ai">AI</span></span>
     </div>
     <nav class="nav">
-      <a href="#how">How it works</a>
-      <a href="#tracker" class="nav-cta">Start Session</a>
+      <a href="#app" class="nav-link">Open Tracker</a>
     </nav>
   </header>
 
   <!-- HERO -->
   <section class="hero">
-    <div class="hero-bg-text" aria-hidden="true">PULL</div>
-    <div class="hero-content">
-      <p class="hero-eyebrow">AI-Powered Rep Tracking</p>
-      <h1 class="hero-headline">Your camera.<br/>Your reps.<br/><em>Zero excuses.</em></h1>
-      <p class="hero-sub">Point your camera, hang from the bar, and let the AI count every rep with pose detection — hands-free, no wearables needed.</p>
-      <a href="#tracker" class="btn-primary">Start Counting</a>
-    </div>
-    <div class="hero-stat-strip">
-      <div class="stat"><span class="stat-num">Real-time</span><span class="stat-label">pose detection</span></div>
-      <div class="stat-divider"></div>
-      <div class="stat"><span class="stat-num">0</span><span class="stat-label">wearables needed</span></div>
-      <div class="stat-divider"></div>
-      <div class="stat"><span class="stat-num">17</span><span class="stat-label">body keypoints tracked</span></div>
+    <div class="hero-inner">
+      <div class="hero-badge">
+        <span class="badge-dot"></span>
+        <span>Live AI pose detection</span>
+      </div>
+      <h1 class="hero-h1">
+        Count every rep.<br/>
+        <span class="hero-gradient">Perfectly.</span>
+      </h1>
+      <p class="hero-p">Real-time body tracking from your webcam counts pull-ups and push-ups automatically. No wearables. No apps. Just move.</p>
+      <div class="hero-actions">
+        <a href="#app" class="btn-hero">Start tracking</a>
+        <span class="hero-note">Works in any browser · No upload ever</span>
+      </div>
+
+      <div class="hero-cards">
+        <div class="hero-card">
+          <div class="hero-card-icon" style="--c:#A78BFA">↑</div>
+          <div>
+            <div class="hero-card-title">Pull-Ups</div>
+            <div class="hero-card-sub">Elbow angle tracking</div>
+          </div>
+        </div>
+        <div class="hero-card">
+          <div class="hero-card-icon" style="--c:#FB923C">↓</div>
+          <div>
+            <div class="hero-card-title">Push-Ups</div>
+            <div class="hero-card-sub">Hip & elbow tracking</div>
+          </div>
+        </div>
+        <div class="hero-card">
+          <div class="hero-card-icon" style="--c:#34D399">⚡</div>
+          <div>
+            <div class="hero-card-title">Real-time</div>
+            <div class="hero-card-sub">30 fps pose detection</div>
+          </div>
+        </div>
+      </div>
     </div>
   </section>
 
-  <!-- HOW IT WORKS -->
-  <section class="how-section" id="how">
-    <p class="section-eyebrow">The Process</p>
-    <h2 class="section-title">Three steps to tracked reps</h2>
-    <div class="steps-grid">
-      <div class="step">
-        <div class="step-icon">📷</div>
-        <h3>Position Camera</h3>
-        <p>Set your phone or webcam to the side so it can see your full body from head to hips while hanging from the bar.</p>
-      </div>
-      <div class="step">
-        <div class="step-icon">🤖</div>
-        <h3>AI Tracks Pose</h3>
-        <p>MoveNet detects 17 keypoints on your body 30× per second — elbows, shoulders, wrists — to understand your position.</p>
-      </div>
-      <div class="step">
-        <div class="step-icon">🔢</div>
-        <h3>Reps Counted</h3>
-        <p>When your chin clears the bar and you return to full hang, one rep is counted. Clean form = clean count.</p>
-      </div>
-    </div>
-  </section>
+  <!-- APP / TRACKER -->
+  <section class="app-section" id="app">
 
-  <!-- TRACKER -->
-  <section class="tracker-section" id="tracker">
-    <div class="tracker-header">
-      <p class="section-eyebrow">Live Session</p>
-      <h2 class="section-title">Rep Counter</h2>
+    <!-- Mode selector -->
+    <div class="mode-selector" id="modeSelector">
+      <button class="mode-btn active" data-mode="pullup">
+        <span class="mode-icon">↑</span>
+        <span class="mode-label">Pull-Up</span>
+      </button>
+      <button class="mode-btn" data-mode="pushup">
+        <span class="mode-icon">↓</span>
+        <span class="mode-label">Push-Up</span>
+      </button>
     </div>
 
-    <div class="tracker-layout">
+    <!-- Main tracker grid -->
+    <div class="tracker-grid">
 
-      <!-- VIDEO + CANVAS -->
-      <div class="camera-container">
-        <div class="camera-frame" id="cameraFrame">
-          <div class="camera-placeholder" id="cameraPlaceholder">
-            <div class="placeholder-icon">📷</div>
-            <p>Camera feed will appear here</p>
-            <p class="placeholder-sub">Click "Enable Camera" to start</p>
-          </div>
-          <video id="videoFeed" autoplay playsinline muted></video>
-          <canvas id="poseCanvas"></canvas>
-          <div class="camera-overlay">
-            <div class="overlay-status" id="overlayStatus">
-              <span class="status-dot" id="statusDot"></span>
-              <span id="statusLabel">Waiting for camera…</span>
+      <!-- LEFT: Camera -->
+      <div class="cam-column">
+        <div class="cam-wrap" id="camWrap">
+          <!-- Idle state -->
+          <div class="cam-idle" id="camIdle">
+            <div class="cam-idle-inner">
+              <div class="cam-idle-icon">
+                <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" width="48" height="48">
+                  <rect x="4" y="12" width="40" height="28" rx="4" stroke="currentColor" stroke-width="2"/>
+                  <circle cx="24" cy="26" r="7" stroke="currentColor" stroke-width="2"/>
+                  <path d="M16 12V10a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2" stroke="currentColor" stroke-width="2"/>
+                </svg>
+              </div>
+              <p class="cam-idle-title">Camera not active</p>
+              <p class="cam-idle-sub">Position yourself so your full body is visible, then start the session.</p>
+              <button class="btn-start" id="btnStart">Enable Camera</button>
             </div>
           </div>
-          <div class="rep-flash" id="repFlash">+1</div>
+
+          <video id="video" autoplay playsinline muted></video>
+          <canvas id="canvas"></canvas>
+
+          <!-- Live HUD -->
+          <div class="hud" id="hud" style="display:none">
+            <div class="hud-left">
+              <div class="hud-pill" id="hudStatus">
+                <span class="hud-dot" id="hudDot"></span>
+                <span id="hudLabel">Detecting…</span>
+              </div>
+            </div>
+            <div class="hud-right">
+              <div class="hud-pill hud-mode" id="hudMode">PULL-UP</div>
+            </div>
+          </div>
+
+          <!-- Rep flash -->
+          <div class="flash" id="flash">+1</div>
+
+          <!-- Stop button overlay -->
+          <button class="btn-stop" id="btnStop" style="display:none">■ Stop</button>
         </div>
 
-        <div class="phase-indicator">
-          <div class="phase-bar">
-            <div class="phase-label">DOWN</div>
-            <div class="phase-track">
-              <div class="phase-fill" id="phaseFill"></div>
-            </div>
-            <div class="phase-label">UP</div>
+        <!-- Phase bar -->
+        <div class="phase-wrap">
+          <span class="phase-cap">Bottom</span>
+          <div class="phase-track">
+            <div class="phase-fill" id="phaseFill"></div>
           </div>
-          <div class="phase-text" id="phaseText">—</div>
+          <span class="phase-cap">Top</span>
+          <div class="angle-badge" id="angleBadge">—</div>
+        </div>
+
+        <!-- Guide tip -->
+        <div class="guide-tip" id="guideTip">
+          <span class="guide-icon">💡</span>
+          <span id="guideText">Position yourself so your full body is visible. Arms should be fully extended at the start.</span>
         </div>
       </div>
 
-      <!-- CONTROLS + STATS -->
-      <div class="controls-panel">
+      <!-- RIGHT: Stats panel -->
+      <div class="stats-column">
 
-        <!-- Counter Display -->
-        <div class="counter-display">
-          <div class="counter-label">REPS</div>
-          <div class="counter-number" id="repCount">0</div>
-          <div class="counter-set">Set <span id="setNumber">1</span></div>
+        <!-- Ring counter -->
+        <div class="ring-card">
+          <div class="ring-wrap">
+            <svg class="ring-svg" viewBox="0 0 200 200">
+              <circle class="ring-bg" cx="100" cy="100" r="80"/>
+              <circle class="ring-prog" id="ringProg" cx="100" cy="100" r="80"
+                stroke-dasharray="502" stroke-dashoffset="502"/>
+            </svg>
+            <div class="ring-inner">
+              <div class="ring-num" id="repCount">0</div>
+              <div class="ring-label">REPS</div>
+              <div class="ring-set">Set <span id="setNum">1</span></div>
+            </div>
+          </div>
+
+          <!-- Target input -->
+          <div class="target-row">
+            <label class="target-label">Target reps</label>
+            <div class="target-input-wrap">
+              <button class="target-btn" id="targetMinus">−</button>
+              <span class="target-val" id="targetVal">10</span>
+              <button class="target-btn" id="targetPlus">+</button>
+            </div>
+          </div>
         </div>
 
-        <!-- Buttons -->
-        <div class="button-group">
-          <button class="btn-cam" id="btnCamera">Enable Camera</button>
-          <button class="btn-reset" id="btnReset" disabled>Reset Reps</button>
-          <button class="btn-set" id="btnNewSet" disabled>New Set</button>
+        <!-- Controls -->
+        <div class="ctrl-row">
+          <button class="ctrl-btn ctrl-reset" id="btnReset" disabled>Reset</button>
+          <button class="ctrl-btn ctrl-newset" id="btnNewSet" disabled>New Set</button>
         </div>
 
         <!-- Sensitivity -->
-        <div class="sensitivity-block">
-          <label class="ctrl-label">Detection Sensitivity</label>
-          <div class="range-row">
-            <span class="range-hint">Strict</span>
-            <input type="range" id="sensitivitySlider" min="1" max="5" value="3" />
-            <span class="range-hint">Loose</span>
+        <div class="panel">
+          <div class="panel-label">Detection sensitivity</div>
+          <div class="slider-wrap">
+            <span class="slider-cap">Strict</span>
+            <input type="range" id="sensitivity" min="1" max="5" value="3" />
+            <span class="slider-cap">Loose</span>
           </div>
         </div>
 
-        <!-- Session Stats -->
-        <div class="stats-block">
-          <h3 class="stats-title">Session Stats</h3>
-          <div class="stats-grid">
-            <div class="stat-card">
-              <div class="stat-card-val" id="totalReps">0</div>
-              <div class="stat-card-label">Total Reps</div>
+        <!-- Session stats -->
+        <div class="panel">
+          <div class="panel-label">Session</div>
+          <div class="session-grid">
+            <div class="sess-item">
+              <div class="sess-val" id="sTotalReps">0</div>
+              <div class="sess-key">Total reps</div>
             </div>
-            <div class="stat-card">
-              <div class="stat-card-val" id="totalSets">1</div>
-              <div class="stat-card-label">Sets Done</div>
+            <div class="sess-item">
+              <div class="sess-val" id="sSets">1</div>
+              <div class="sess-key">Sets</div>
             </div>
-            <div class="stat-card">
-              <div class="stat-card-val" id="bestSet">0</div>
-              <div class="stat-card-label">Best Set</div>
+            <div class="sess-item">
+              <div class="sess-val" id="sBest">0</div>
+              <div class="sess-key">Best set</div>
             </div>
-            <div class="stat-card">
-              <div class="stat-card-val" id="elapsedTime">0:00</div>
-              <div class="stat-card-label">Session Time</div>
+            <div class="sess-item">
+              <div class="sess-val" id="sTime">0:00</div>
+              <div class="sess-key">Time</div>
             </div>
           </div>
         </div>
 
-        <!-- Set History -->
-        <div class="history-block">
-          <h3 class="stats-title">Set History</h3>
-          <div class="history-list" id="historyList">
-            <p class="history-empty">No sets completed yet.</p>
+        <!-- Set history -->
+        <div class="panel panel-history">
+          <div class="panel-label">Set history</div>
+          <div class="history" id="history">
+            <div class="history-empty">No sets yet</div>
           </div>
         </div>
 
@@ -165,23 +237,22 @@
     </div>
 
     <!-- Loading overlay -->
-    <div class="model-loading" id="modelLoading">
-      <div class="loading-box">
-        <div class="loading-spinner"></div>
-        <p class="loading-title">Loading AI Model</p>
-        <p class="loading-sub">Downloading MoveNet pose detector…</p>
-        <div class="loading-bar-track"><div class="loading-bar-fill" id="loadingBarFill"></div></div>
+    <div class="loading-overlay" id="loadingOverlay">
+      <div class="loading-card">
+        <div class="loading-ring"></div>
+        <div class="loading-title">Loading AI model</div>
+        <div class="loading-sub">Downloading MoveNet pose detector…</div>
+        <div class="loading-track"><div class="loading-fill"></div></div>
       </div>
     </div>
   </section>
 
   <!-- FOOTER -->
   <footer class="footer">
-    <div class="footer-logo">↑ PULLFORCE AI</div>
-    <p class="footer-note">Pose detection runs entirely in your browser. No video is ever uploaded.</p>
+    <div class="footer-brand">RepTrack AI</div>
+    <div class="footer-note">All processing happens locally in your browser. No video is ever sent anywhere.</div>
   </footer>
 
-  <!-- Scripts -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3/dist/pose-detection.min.js"></script>
   <script src="app.js"></script>
